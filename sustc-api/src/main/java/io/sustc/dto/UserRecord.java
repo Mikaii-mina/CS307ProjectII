@@ -28,7 +28,7 @@ public class UserRecord implements Serializable {
     private String authorName;
 
     /**
-     * The gender of this author. Gender in {Male, Female}
+     * The gender of this author. Gender in {MALE, FEMALE}
      */
     private String gender;
 
@@ -63,5 +63,4 @@ public class UserRecord implements Serializable {
      * Indicates whether the user has been deleted (soft delete).
      */
     private boolean isDeleted;
-
 }

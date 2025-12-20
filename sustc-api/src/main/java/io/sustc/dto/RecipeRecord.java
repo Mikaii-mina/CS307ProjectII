@@ -7,6 +7,9 @@ import lombok.NoArgsConstructor;
 
 import java.io.Serializable;
 import java.sql.Timestamp;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * The recipe record used for data import
@@ -138,5 +141,31 @@ public class RecipeRecord implements Serializable {
      * The output of the recipe (the quantity, weight or volume of the food)
      */
     private String recipeYield;
+
+    /**
+     * 获取食材列表
+     * @return 不可修改的食材列表（避免外部修改影响内部数组），如果数组为null则返回空列表
+     */
+    public List<String> getIngredients() {
+        if (recipeIngredientParts == null) {
+            // 返回空列表而非null，避免空指针异常
+            return Collections.emptyList();
+        }
+        // 将数组转换为不可修改的列表，防止外部修改内部数据
+        return Collections.unmodifiableList(Arrays.asList(recipeIngredientParts));
+    }
+
+    /**
+     * 设置食材列表
+     * @param ingredients 食材列表（null则清空内部数组）
+     */
+    public void setIngredients(List<String> ingredients) {
+        if (ingredients == null || ingredients.isEmpty()) {
+            this.recipeIngredientParts = null;
+        } else {
+            // 将列表转换为数组存储
+            this.recipeIngredientParts = ingredients.toArray(new String[0]);
+        }
+    }
 
 }

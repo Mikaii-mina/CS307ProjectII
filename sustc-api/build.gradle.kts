@@ -16,6 +16,13 @@ dependencies {
     implementation("com.opencsv:opencsv:5.7.1")
 
     implementation("org.furyio:fury-core:0.3.1")
+    // PostgreSQL驱动
+    implementation("org.postgresql:postgresql")
+    // Lombok（简化DTO和实现类代码）
+    compileOnly("org.projectlombok:lombok")
+    annotationProcessor("org.projectlombok:lombok")
+    // 工具类（处理ISO 8601时长、日期等）
+    implementation("org.apache.commons:commons-lang3")
 
     // You may add any utility library you want to use, such as guava.
     // ORM libraries are prohibited in this project.

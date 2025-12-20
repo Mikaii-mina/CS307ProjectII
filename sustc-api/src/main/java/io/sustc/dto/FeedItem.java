@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.io.Serializable;
+import java.sql.Timestamp;
 import java.time.Instant;
 
 @Builder
@@ -37,7 +38,7 @@ public class FeedItem implements Serializable {
     /**
      * Timestamp indicating when the recipe was published.
      */
-    private Instant datePublished;
+    private Timestamp datePublished;
 
     /**
      * Aggregated rating value computed from all reviews of this recipe.
@@ -48,4 +49,11 @@ public class FeedItem implements Serializable {
      * Total number of reviews associated with this recipe.
      */
     private Integer reviewCount;
+
+    private String recipeCategory;
+
+
+    public void setCategory(String recipeCategory) {
+        this.recipeCategory = recipeCategory;
+    }
 }

@@ -7,6 +7,10 @@ import lombok.NoArgsConstructor;
 
 import java.io.Serializable;
 import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * The review record used for data import
@@ -62,4 +66,33 @@ public class ReviewRecord implements Serializable {
      * List of users who have given this review a like
      */
     private long[] likes;
+
+    /**
+     * 设置点赞用户列表（将List<Long>转换为long[]存储）
+     * @param likeUsers 点赞用户ID的列表
+     */
+    public void setLikeUsers(List<Long> likeUsers) {
+        if (likeUsers == null) {
+            this.likes = new long[0]; // 空列表时设为空数组
+            return;
+        }
+        // 将List<Long>转换为long[]
+        this.likes = likeUsers.stream()
+                .mapToLong(Long::longValue)
+                .toArray();
+    }
+
+    /**
+     * 获取点赞用户列表（将long[]转换为List<Long>返回）
+     * @return 点赞用户ID的列表
+     */
+    public List<Long> getLikeUsers() {
+        if (likes == null) {
+            return new ArrayList<>(); // 空数组时返回空列表
+        }
+        // 将long[]转换为List<Long>
+        return Arrays.stream(likes)
+                .boxed()
+                .collect(Collectors.toList());
+    }
 }

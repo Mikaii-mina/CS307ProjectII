@@ -26,7 +26,6 @@ import java.nio.file.Paths;
 import java.sql.Timestamp;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.time.Instant;
 import java.util.*;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
@@ -35,6 +34,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+
 
 //在Spring Shell应用中Java类需要使用注解@ShellComponent来修饰，
 //类中的方法使用注解@ShellMethod表示为一个具体的命令。
@@ -64,6 +64,10 @@ public class DatabaseCommand {
     @Autowired
     private BenchmarkConfig config;
 
+    List<ReviewRecord> reviewRecords;
+    List<UserRecord> userRecords;
+    List<RecipeRecord> recipeRecords;
+
     @ShellMethod(key = "db groupmember", value = "List group members")
     public List<Integer> listGroupMembers() {
         return databaseService.getGroupMembers();
@@ -71,10 +75,13 @@ public class DatabaseCommand {
 
     @ShellMethod(key = "db import", value = "Drop all the tables. Then import data from csv")
     public void importData() {
+
         long startTime = System.currentTimeMillis();
 
         databaseService.drop();
-        benchmarkService.importData();
+        databaseService.importData(reviewRecords,
+                        userRecords,
+                        recipeRecords);
 
         long endTime = System.currentTimeMillis();
         long duration = endTime - startTime;
@@ -99,19 +106,19 @@ public class DatabaseCommand {
             String projectRoot = System.getProperty("user.dir");
             System.out.println("projectRoot:" + projectRoot);
 
-            List<UserRecord> users = loadUsers(projectRoot + "/data/csv/users.csv");
-            List<RecipeRecord> recipes = loadRecipes(projectRoot + "/data/csv/recipes.csv");
-            List<ReviewRecord> reviews = loadReviews(projectRoot + "/data/csv/reviews.csv");
+            userRecords = loadUsers(projectRoot + "/data/csv/users.csv");
+            recipeRecords = loadRecipes(projectRoot + "/data/csv/recipes.csv");
+            reviewRecords = loadReviews(projectRoot + "/data/csv/reviews.csv");
 
             // 序列化数据
-            serializeData(users, projectRoot + "/data/import/users.ser");
-            serializeData(recipes, projectRoot + "/data/import/recipes.ser");
-            serializeData(reviews, projectRoot + "/data/import/reviews.ser");
+            serializeData(userRecords, projectRoot + "/data/import/users.ser");
+            serializeData(recipeRecords, projectRoot + "/data/import/recipes.ser");
+            serializeData(reviewRecords, projectRoot + "/data/import/reviews.ser");
 
             System.out.println("Data loading and serialization have been completed!");
-            System.out.println("user count: " + users.size());
-            System.out.println("recipe count: " + recipes.size());
-            System.out.println("review count: " + reviews.size());
+            System.out.println("user count: " + userRecords.size());
+            System.out.println("recipe count: " + recipeRecords.size());
+            System.out.println("review count: " + reviewRecords.size());
 
         } catch (Exception e) {
             e.printStackTrace();
