@@ -76,7 +76,6 @@ public class ReviewRecord implements Serializable {
             this.likes = new long[0]; // 空列表时设为空数组
             return;
         }
-        // 将List<Long>转换为long[]
         this.likes = likeUsers.stream()
                 .mapToLong(Long::longValue)
                 .toArray();

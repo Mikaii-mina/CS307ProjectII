@@ -4,13 +4,13 @@ import com.opencsv.CSVReaderBuilder;
 import com.opencsv.RFC4180ParserBuilder;
 import io.fury.ThreadSafeFury;
 import io.sustc.benchmark.BenchmarkConfig;
-import io.sustc.benchmark.BenchmarkConstants;
 import io.sustc.benchmark.BenchmarkService;
 import io.sustc.dto.*;
 import io.sustc.service.DatabaseService;
 import io.sustc.service.RecipeService;
 import io.sustc.service.ReviewService;
 import io.sustc.service.UserService;
+import io.sustc.service.impl.DatabaseServiceImpl;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,6 +67,8 @@ public class DatabaseCommand {
     List<ReviewRecord> reviewRecords;
     List<UserRecord> userRecords;
     List<RecipeRecord> recipeRecords;
+    @Autowired
+    private DatabaseServiceImpl databaseServiceImpl;
 
     @ShellMethod(key = "db groupmember", value = "List group members")
     public List<Integer> listGroupMembers() {
@@ -173,17 +175,14 @@ public class DatabaseCommand {
         }
 
         String trimmedStr = listStr.trim();
-        // 移除开头的括号和结尾的引号“
         if(trimmedStr.length()>=2) {
             trimmedStr = trimmedStr.substring(1, trimmedStr.length() - 1);
         }
 
-        // 如果字符串已经是空字符串，返回空数组
         if (trimmedStr.isEmpty()) {
             return new long[0];
         }
 
-        // 使用逗号分割字符串，并去除每个部分的前后空格
         String[] stringArray = trimmedStr.split("\\s*,\\s*");
         long[] longArray = new long[stringArray.length];
 
@@ -191,20 +190,18 @@ public class DatabaseCommand {
             try {
                 longArray[i] = Long.parseLong(stringArray[i].trim());
             } catch (NumberFormatException e) {
-                longArray[i] = 0L; // 解析失败设为0
+                longArray[i] = 0L;
             }
         }
 
         return longArray;
     }
 
-    // 辅助方法：解析时间戳
     private static Timestamp parseTimestamp(String timestampStr) {
         if (timestampStr == null || timestampStr.trim().isEmpty() || "null".equalsIgnoreCase(timestampStr.trim())) {
             return null;
         }
 
-        // 尝试多种日期格式
         String[] dateFormats = {"yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd", "MM/dd/yyyy HH:mm:ss", "MM/dd/yyyy"};
 
         for (String format : dateFormats) {
@@ -213,14 +210,12 @@ public class DatabaseCommand {
                 Date date = sdf.parse(timestampStr.trim());
                 return new Timestamp(date.getTime());
             } catch (ParseException e) {
-                // 尝试下一种格式
             }
         }
 
-        return null; // 所有格式都解析失败
+        return null;
     }
 
-    // 辅助方法：解析浮点数，处理空值和异常
     private static float parseFloat(String floatStr) {
         if (floatStr == null || floatStr.trim().isEmpty() || "null".equalsIgnoreCase(floatStr.trim())) {
             return 0.0f;
@@ -233,7 +228,6 @@ public class DatabaseCommand {
         }
     }
 
-    // 辅助方法：解析整数，处理空值和异常
     private static int parseInt(String intStr) {
         if (intStr == null || intStr.trim().isEmpty() || "null".equalsIgnoreCase(intStr.trim())) {
             return 0;
@@ -246,7 +240,6 @@ public class DatabaseCommand {
         }
     }
 
-    // 辅助方法：解析长整型，处理空值和异常
     private static long parseLong(String longStr) {
         if (longStr == null || longStr.trim().isEmpty() || "null".equalsIgnoreCase(longStr.trim())) {
             return 0L;
@@ -259,14 +252,12 @@ public class DatabaseCommand {
         }
     }
 
-    // 加载用户数据
     public static List<UserRecord> loadUsers(String filePath) throws IOException, CsvException {
         List<UserRecord> users = new ArrayList<>();
 
         try (CSVReader reader = new CSVReader(new FileReader(filePath))) {
             List<String[]> records = reader.readAll();
 
-            // 跳过标题行
             for (int i = 1; i < records.size(); i++) {
                 String[] fields = records.get(i);
 
@@ -286,18 +277,14 @@ public class DatabaseCommand {
         return users;
     }
 
-    //加载食谱数据
     public static List<RecipeRecord> loadRecipes(String filePath) throws IOException, CsvException {
         List<RecipeRecord> recipes = new ArrayList<>();
-
-        // 使用 RFC4180Parser 创建 CSVReader
         try (CSVReader reader = new CSVReaderBuilder(new FileReader(filePath))
                 .withCSVParser(new RFC4180ParserBuilder().build())
                 .build()) {
 
             List<String[]> records = reader.readAll();
 
-            // 跳过标题行
             for (int i = 1; i < records.size(); i++) {
                 String[] fields = records.get(i);
 
@@ -337,14 +324,10 @@ public class DatabaseCommand {
         return recipes;
     }
 
-    // 加载评论数据
     public static List<ReviewRecord> loadReviews(String filePath) throws IOException, CsvException {
         List<ReviewRecord> reviews = new ArrayList<>();
-
         try (CSVReader reader = new CSVReader(new FileReader(filePath))) {
             List<String[]> records = reader.readAll();
-
-            // 跳过标题行
             for (int i = 1; i < records.size(); i++) {
                 String[] fields = records.get(i);
 
@@ -352,7 +335,7 @@ public class DatabaseCommand {
                     ReviewRecord review = ReviewRecord.builder().reviewId(parseLong(fields[0])).
                             recipeId(parseLong(fields[1])).authorId(parseLong(fields[2])).
                             authorName(fields[3] != null ? fields[3].trim() : "").
-                            rating(parseFloat(fields[4])).review(fields[5] != null ? fields[5].trim() : "").
+                            rating(parseInt(fields[4])).review(fields[5] != null ? fields[5].trim() : "").
                             dateSubmitted(parseTimestamp(fields[6])).dateModified(parseTimestamp(fields[7])).
                             likes(parseCsvLongList(fields[8])).build();
 
@@ -387,6 +370,8 @@ public class DatabaseCommand {
 
         log.info("serialize path {}", file);
     }
+
+
 
 
 }

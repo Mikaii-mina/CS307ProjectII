@@ -51,9 +51,4 @@ public class FeedItem implements Serializable {
     private Integer reviewCount;
 
     private String recipeCategory;
-
-
-    public void setCategory(String recipeCategory) {
-        this.recipeCategory = recipeCategory;
-    }
 }

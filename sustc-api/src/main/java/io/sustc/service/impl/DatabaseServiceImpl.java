@@ -7,20 +7,15 @@ import io.sustc.service.DatabaseService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.*;
 import javax.sql.DataSource;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.List;
 
 /**
@@ -30,7 +25,6 @@ import java.util.List;
 @Service
 @Slf4j
 public class DatabaseServiceImpl implements DatabaseService {
-
     /**
      * Getting a {@link DataSource} instance from the framework, whose connections are managed by HikariCP.
      * <p>
@@ -43,7 +37,6 @@ public class DatabaseServiceImpl implements DatabaseService {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
-
 
     @Override
     public List<Integer> getGroupMembers() {
@@ -58,38 +51,22 @@ public class DatabaseServiceImpl implements DatabaseService {
             List<UserRecord> userRecords,
             List<RecipeRecord> recipeRecords) {
         try {
-            // ddl to create tables.
             createTables();
-            System.out.println("表创建逻辑执行完成"); // 打印日志
-
-            // TODO: implement your import logic
             importUsers(userRecords);
-            System.out.println("用户数据导入完成，数量：" + (userRecords == null ? 0 : userRecords.size()));
             importUserFollows(userRecords);
-
             importRecipes(recipeRecords);
-            System.out.println("食谱数据导入完成，数量：" + (recipeRecords == null ? 0 : recipeRecords.size()));
             importRecipeIngredients(recipeRecords);
-
             importReviews(reviewRecords);
-            System.out.println("评论数据导入完成，数量：" + (reviewRecords == null ? 0 : reviewRecords.size()));
             importReviewLikes(reviewRecords);
-
-
-            // 手动提交事务（若用JdbcTemplate/原生JDBC）
-            // jdbcTemplate.execute("COMMIT"); // 可选，Spring 事务默认自动提交
         } catch (Exception e) {
-            // 打印所有异常（包括RuntimeException）
             System.err.println("导入数据时发生异常：" + e.getMessage());
             e.printStackTrace();
-            throw e; // 抛出异常，让外层感知
+            throw e;
         }
     }
 
-
     private void createTables() {
         String[] createTableSQLs = {
-                // 创建users表
                 "CREATE TABLE IF NOT EXISTS users (" +
                         "    AuthorId BIGINT PRIMARY KEY, " +
                         "    AuthorName VARCHAR(255) NOT NULL, " +
@@ -101,7 +78,6 @@ public class DatabaseServiceImpl implements DatabaseService {
                         "    IsDeleted BOOLEAN DEFAULT FALSE" +
                         ")",
 
-                // 创建recipes表
                 "CREATE TABLE IF NOT EXISTS recipes (" +
                         "    RecipeId BIGINT PRIMARY KEY, " +
                         "    Name VARCHAR(500) NOT NULL, " +
@@ -112,7 +88,7 @@ public class DatabaseServiceImpl implements DatabaseService {
                         "    DatePublished TIMESTAMP, " +
                         "    Description TEXT, " +
                         "    RecipeCategory VARCHAR(255), " +
-                        "    AggregatedRating DECIMAL(3,2) CHECK (AggregatedRating >= 0 AND AggregatedRating <= 5), " +
+                        "    AggregatedRating FLOAT CHECK (AggregatedRating >= 0 AND AggregatedRating <= 5), " +
                         "    ReviewCount INTEGER DEFAULT 0 CHECK (ReviewCount >= 0), " +
                         "    Calories DECIMAL(10,2), " +
                         "    FatContent DECIMAL(10,2), " +
@@ -123,14 +99,13 @@ public class DatabaseServiceImpl implements DatabaseService {
                         "    FiberContent DECIMAL(10,2), " +
                         "    SugarContent DECIMAL(10,2), " +
                         "    ProteinContent DECIMAL(10,2), " +
-                        "    RecipeServings VARCHAR(100), " +
+                        "    RecipeServings INTEGER, " +
                         "    RecipeYield VARCHAR(100), " +
                         "    FOREIGN KEY (AuthorId) REFERENCES users(AuthorId)" +
                         ")",
 
-                // 创建reviews表
                 "CREATE TABLE IF NOT EXISTS reviews (" +
-                        "    ReviewId BIGINT PRIMARY KEY, " +
+                        "    ReviewId BIGINT PRIMARY KEY , " +
                         "    RecipeId BIGINT NOT NULL, " +
                         "    AuthorId BIGINT NOT NULL, " +
                         "    Rating INTEGER, " +
@@ -141,7 +116,6 @@ public class DatabaseServiceImpl implements DatabaseService {
                         "    FOREIGN KEY (AuthorId) REFERENCES users(AuthorId)" +
                         ")",
 
-                // 创建recipe_ingredients表
                 "CREATE TABLE IF NOT EXISTS recipe_ingredients (" +
                         "    RecipeId BIGINT, " +
                         "    IngredientPart VARCHAR(500), " +
@@ -149,7 +123,6 @@ public class DatabaseServiceImpl implements DatabaseService {
                         "    FOREIGN KEY (RecipeId) REFERENCES recipes(RecipeId)" +
                         ")",
 
-                // 创建review_likes表
                 "CREATE TABLE IF NOT EXISTS review_likes (" +
                         "    ReviewId BIGINT, " +
                         "    AuthorId BIGINT, " +
@@ -158,7 +131,6 @@ public class DatabaseServiceImpl implements DatabaseService {
                         "    FOREIGN KEY (AuthorId) REFERENCES users(AuthorId)" +
                         ")",
 
-                // 创建user_follows表
                 "CREATE TABLE IF NOT EXISTS user_follows (" +
                         "    FollowerId BIGINT, " +
                         "    FollowingId BIGINT, " +
@@ -168,10 +140,10 @@ public class DatabaseServiceImpl implements DatabaseService {
                         "    CHECK (FollowerId != FollowingId)" +
                         ")"
         };
-
         for (String sql : createTableSQLs) {
             jdbcTemplate.execute(sql);
         }
+//        createIndexAndView();
     }
 
     private void importUsers(List<UserRecord> userRecords) {
@@ -257,19 +229,22 @@ public class DatabaseServiceImpl implements DatabaseService {
                 "VALUES (?, ?) ON CONFLICT (RecipeId, IngredientPart) DO NOTHING";
 
         for (RecipeRecord recipe : recipeRecords) {
-            if (recipe.getIngredients() == null || recipe.getIngredients().isEmpty()) {
+            // 使用 getRecipeIngredientParts() 而不是 getIngredients()
+            String[] ingredientParts = recipe.getRecipeIngredientParts();
+            if (ingredientParts == null || ingredientParts.length == 0) {
                 continue;
             }
+
             jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
                 @Override
                 public void setValues(PreparedStatement ps, int i) throws SQLException {
                     ps.setLong(1, recipe.getRecipeId());
-                    ps.setString(2, recipe.getIngredients().get(i));
+                    ps.setString(2, ingredientParts[i]);  // 正确的方法名
                 }
 
                 @Override
                 public int getBatchSize() {
-                    return recipe.getIngredients().size();
+                    return ingredientParts.length;  // 正确的方法名
                 }
             });
         }
@@ -307,12 +282,10 @@ public class DatabaseServiceImpl implements DatabaseService {
 
         for (ReviewRecord review : reviewRecords) {
             long reviewId = review.getReviewId();
-            List<Long> likeAuthorIds = review.getLikeUsers(); // 从评论记录中获取点赞用户ID列表
-
+            List<Long> likeAuthorIds = review.getLikeUsers();
             if (likeAuthorIds == null || likeAuthorIds.size() == 0) {
                 continue;
             }
-
             jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
                 @Override
                 public void setValues(PreparedStatement ps, int i) throws SQLException {
@@ -327,48 +300,43 @@ public class DatabaseServiceImpl implements DatabaseService {
             });
         }
     }
+
     private void importUserFollows(List<UserRecord> userRecords) {
         String sql = "INSERT INTO user_follows (FollowerId, FollowingId) " +
                 "VALUES (?, ?) ON CONFLICT (FollowerId, FollowingId) DO NOTHING";
 
         for (UserRecord user : userRecords) {
             long currentUserId = user.getAuthorId();
-            long[] followerUsers = user.getFollowerUsers(); // 关注当前用户的人
-            long[] followingUsers = user.getFollowingUsers(); // 当前用户关注的人
+            long[] followerUsers = user.getFollowerUsers();
+            long[] followingUsers = user.getFollowingUsers();
 
-            // 存储该用户所有有效关注关系（FollowerId, FollowingId）
             List<long[]> allRelations = new ArrayList<>();
 
-            // 1. 处理当前用户关注的人 → (currentUserId, 被关注人ID)
             if (followingUsers != null && followingUsers.length > 0) {
                 for (long followedId : followingUsers) {
-                    if (currentUserId != followedId) { // 排除自关注
+                    if (currentUserId != followedId) {
                         allRelations.add(new long[]{currentUserId, followedId});
                     }
                 }
             }
-
-            // 2. 处理关注当前用户的人 → (关注人ID, currentUserId)
             if (followerUsers != null && followerUsers.length > 0) {
                 for (long followerId : followerUsers) {
-                    if (followerId != currentUserId) { // 排除自关注
+                    if (followerId != currentUserId) {
                         allRelations.add(new long[]{followerId, currentUserId});
                     }
                 }
             }
 
-            // 无有效关系则跳过
             if (allRelations.isEmpty()) {
                 continue;
             }
 
-            // 批量插入该用户的所有关注关系
             jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
                 @Override
                 public void setValues(PreparedStatement ps, int i) throws SQLException {
                     long[] relation = allRelations.get(i);
-                    ps.setLong(1, relation[0]); // FollowerId
-                    ps.setLong(2, relation[1]); // FollowingId
+                    ps.setLong(1, relation[0]);
+                    ps.setLong(2, relation[1]);
                 }
 
                 @Override
@@ -378,19 +346,9 @@ public class DatabaseServiceImpl implements DatabaseService {
             });
         }
     }
-    /*
-     * The following code is just a quick example of using jdbc datasource.
-     * Practically, the code interacts with database is usually written in a DAO layer.
-     *
-     * Reference: [Data Access Object pattern](https://www.baeldung.com/java-dao-pattern)
-     */
 
     @Override
     public void drop() {
-        // You can use the default drop script provided by us in most cases,
-        // but if it doesn't work properly, you may need to modify it.
-        // This method will delete all the tables in the public schema.
-
         String sql = "DO $$\n" +
                 "DECLARE\n" +
                 "    tables CURSOR FOR\n" +
@@ -429,4 +387,77 @@ public class DatabaseServiceImpl implements DatabaseService {
             throw new RuntimeException(e);
         }
     }
+
+    public void createIndexAndView() {
+        // 创建索引
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_users_followers ON users(Followers DESC)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_users_age ON users(Age DESC)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_recipes_category ON recipes(RecipeCategory)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_recipes_rating ON recipes(AggregatedRating DESC)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_recipes_author_date ON recipes(AuthorId, DatePublished DESC)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_recipes_calories ON recipes(Calories)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_recipes_category_rating_date ON recipes(RecipeCategory, AggregatedRating DESC, DatePublished DESC)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_reviews_recipe_rating ON reviews(RecipeId, Rating DESC)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_reviews_author_date ON reviews(AuthorId, DateSubmitted DESC)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_reviews_recipe_date ON reviews(RecipeId, DateSubmitted DESC)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_part ON recipe_ingredients(IngredientPart)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_review_likes_author ON review_likes(AuthorId)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_user_follows_follower ON user_follows(FollowerId)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_user_follows_following ON user_follows(FollowingId)");
+
+        // 创建或替换视图
+        jdbcTemplate.execute("CREATE OR REPLACE VIEW v_user_statistics AS " +
+                "SELECT u.AuthorId, u.AuthorName, u.Gender, u.Age, u.Followers, u.Following, " +
+                "COUNT(DISTINCT r.RecipeId) AS recipe_count, COUNT(DISTINCT rv.ReviewId) AS review_count, " +
+                "COUNT(DISTINCT rl.ReviewId) AS like_count, MAX(r.DatePublished) AS last_recipe_date, " +
+                "MAX(rv.DateSubmitted) AS last_review_date " +
+                "FROM users u LEFT JOIN recipes r ON u.AuthorId = r.AuthorId " +
+                "LEFT JOIN reviews rv ON u.AuthorId = rv.AuthorId " +
+                "LEFT JOIN review_likes rl ON rv.ReviewId = rl.ReviewId AND rl.AuthorId = u.AuthorId " +
+                "WHERE u.IsDeleted = FALSE GROUP BY u.AuthorId, u.AuthorName, u.Gender, u.Age, u.Followers, u.Following");
+
+        jdbcTemplate.execute("CREATE OR REPLACE VIEW v_recipe_details AS " +
+                "SELECT r.RecipeId, r.Name AS recipe_name, r.RecipeCategory, r.AggregatedRating, " +
+                "r.ReviewCount, r.Calories, r.FatContent, r.ProteinContent, r.DatePublished, " +
+                "u.AuthorId, u.AuthorName, u.Followers AS author_followers, " +
+                "COUNT(DISTINCT rv.ReviewId) AS total_reviews, COUNT(DISTINCT rl.AuthorId) AS total_likes, " +
+                "ARRAY_AGG(DISTINCT ri.IngredientPart) AS ingredients, " +
+                "STRING_AGG(DISTINCT ri.IngredientPart, ', ') AS ingredients_text " +
+                "FROM recipes r JOIN users u ON r.AuthorId = u.AuthorId " +
+                "LEFT JOIN recipe_ingredients ri ON r.RecipeId = ri.RecipeId " +
+                "LEFT JOIN reviews rv ON r.RecipeId = rv.RecipeId " +
+                "LEFT JOIN review_likes rl ON rv.ReviewId = rl.ReviewId " +
+                "WHERE u.IsDeleted = FALSE GROUP BY r.RecipeId, r.Name, r.RecipeCategory, " +
+                "r.AggregatedRating, r.ReviewCount, r.Calories, r.FatContent, r.ProteinContent, " +
+                "r.DatePublished, u.AuthorId, u.AuthorName, u.Followers");
+
+        jdbcTemplate.execute("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_hot_recipes AS " +
+                "SELECT r.RecipeId, r.Name, u.AuthorName, r.RecipeCategory, r.AggregatedRating, " +
+                "COUNT(DISTINCT rv.ReviewId) AS total_reviews, " +
+                "r.AggregatedRating * 10 + COUNT(DISTINCT rv.ReviewId) AS hot_level " +
+                "FROM recipes r JOIN users u ON r.AuthorId = u.AuthorId " +
+                "LEFT JOIN reviews rv ON r.RecipeId = rv.RecipeId " +
+                "LEFT JOIN review_likes rl ON rv.ReviewId = rl.ReviewId " +
+                "WHERE u.IsDeleted = FALSE GROUP BY r.RecipeId, r.Name, r.RecipeCategory, " +
+                "r.AggregatedRating, r.ReviewCount, r.DatePublished, u.AuthorName " +
+                "HAVING COUNT(DISTINCT rv.ReviewId) >= 5 ORDER BY hot_level DESC LIMIT 100");
+
+        jdbcTemplate.execute("CREATE OR REPLACE VIEW v_healthy_recipes AS " +
+                "SELECT r.RecipeId, r.Name, r.RecipeCategory, r.Calories, r.ProteinContent, " +
+                "r.FatContent, r.CarbohydrateContent, r.AggregatedRating, " +
+                "ROUND(r.ProteinContent * 4.0 / NULLIF(r.Calories, 0) * 100, 2) AS protein_ratio " +
+                "FROM recipes r WHERE r.Calories <= 500 AND r.ProteinContent >= 20 AND r.FatContent <= 30 " +
+                "ORDER BY protein_ratio DESC, r.AggregatedRating DESC");
+
+        jdbcTemplate.execute("CREATE OR REPLACE VIEW v_review_analysis AS " +
+                "SELECT rv.ReviewId, rv.Rating, rv.DateSubmitted, r.Name AS recipe_name, " +
+                "r.RecipeCategory, u.AuthorName AS reviewer_name, u.Followers AS reviewer_followers, " +
+                "COUNT(DISTINCT rl.AuthorId) AS like_count, LENGTH(rv.Review) AS review_length, " +
+                "CASE WHEN rv.Rating >= 4 THEN 'Positive' WHEN rv.Rating >= 3 THEN 'Neutral' ELSE 'Negative' END AS sentiment " +
+                "FROM reviews rv JOIN recipes r ON rv.RecipeId = r.RecipeId " +
+                "JOIN users u ON rv.AuthorId = u.AuthorId " +
+                "LEFT JOIN review_likes rl ON rv.ReviewId = rl.ReviewId " +
+                "WHERE u.IsDeleted = FALSE ORDER BY rv.DateSubmitted DESC");
+    }
+
 }

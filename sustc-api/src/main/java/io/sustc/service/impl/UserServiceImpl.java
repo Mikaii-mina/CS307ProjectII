@@ -5,26 +5,14 @@ import io.sustc.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.EmptyResultDataAccessException;
-import org.springframework.jdbc.core.BeanPropertyRowMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
-import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.Period;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
+import java.time.*;
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -35,64 +23,136 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public long register(RegisterUserReq req) {
-        // 1. 修正：必填字段校验（修复性别匹配+空值校验）
-        if (!StringUtils.hasText(req.getName()) || // 用户名非空
-                req.getGender() == null || // 性别枚举非空
-                !Arrays.asList(RegisterUserReq.Gender.MALE, RegisterUserReq.Gender.FEMALE).contains(req.getGender()) || // 枚举值匹配
-                !StringUtils.hasText(req.getBirthday()) || // 生日非空
-                !StringUtils.hasText(req.getPassword())) { // 密码非空
-            log.error("注册失败：有必填字段未填（用户名/性别/生日/密码不能为空）");
-            return -1;
+        if (req == null) {
+            throw new IllegalArgumentException("Request cannot be null");
         }
 
-        // 2. 修正：用户名唯一性校验（字段名统一为AuthorName）
-        Boolean nameExists = jdbcTemplate.queryForObject(
-                "SELECT EXISTS (SELECT 1 FROM users WHERE AuthorName = ?)",
-                Boolean.class,
-                req.getName()
+        if (!StringUtils.hasText(req.getName())) {
+            throw new IllegalArgumentException("Username cannot be empty");
+        }
+
+        String genderStr = extractGenderString(req);
+        if (!StringUtils.hasText(genderStr)) {
+            throw new IllegalArgumentException("Gender cannot be empty");
+        }
+
+        if (!StringUtils.hasText(req.getPassword())) {
+            throw new IllegalArgumentException("Password cannot be empty");
+        }
+
+        LocalDate birthday = extractBirthday(req);
+        if (birthday == null) {
+            throw new IllegalArgumentException("Birthday cannot be empty");
+        }
+        if (usernameExists(req.getName())) {
+            throw new IllegalArgumentException("Username already exists");
+        }
+
+        String dbGender;
+        String inputGender = genderStr.toUpperCase();
+        if ("MALE".equals(inputGender)) {
+            dbGender = "Male";
+        } else if ("FEMALE".equals(inputGender)) {
+            dbGender = "Female";
+        } else {
+            throw new IllegalArgumentException("Invalid gender. Must be MALE or FEMALE");
+        }
+        int age = calculateAge(birthday);
+        if (age <= 0) {
+            throw new IllegalArgumentException("Invalid birthday");
+        }
+        Long maxId = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(MAX(AuthorId), 0) FROM users",
+                Long.class
         );
-        if (Boolean.TRUE.equals(nameExists)) { // 更安全的空值判断
-            log.error("注册失败：用户名{}已存在", req.getName());
-            return -1;
+        if (maxId == null) {
+            maxId = 0L;
         }
+        long authorId = maxId + 1;
+        String sql = "INSERT INTO users (AuthorId, AuthorName, Gender, Age, Followers, Following, Password, IsDeleted) " +
+                "VALUES (?, ?, ?, ?, 0, 0, ?, FALSE)";
 
-        // 3. 生日转年龄（关键：补充Age字段）
-        int age = 0;
         try {
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
-            LocalDate birthDate = LocalDate.parse(req.getBirthday(), formatter);
-            age = Period.between(birthDate, LocalDate.now()).getYears();
+            jdbcTemplate.update(sql,
+                    authorId,
+                    req.getName().trim(),
+                    dbGender,
+                    age,
+                    req.getPassword()
+            );
+
+            return authorId;
         } catch (Exception e) {
-            log.error("生日格式错误，无法转换为年龄：{}", req.getBirthday());
+            throw new IllegalArgumentException("Registration failed: " + e.getMessage());
+        }
+    }
+
+    private String extractGenderString(RegisterUserReq req) {
+        Object gender = req.getGender();
+        if (gender == null) {
+            return null;
+        }
+
+        if (gender instanceof String) {
+            return (String) gender;
+        } else if (gender instanceof Enum) {
+            return ((Enum<?>) gender).name();
+        } else {
+            return gender.toString();
+        }
+    }
+
+    private LocalDate extractBirthday(RegisterUserReq req) {
+        Object birthday = req.getBirthday();
+        if (birthday == null) {
+            return null;
+        }
+
+        if (birthday instanceof LocalDate) {
+            return (LocalDate) birthday;
+        } else if (birthday instanceof String) {
+            try {
+                return LocalDate.parse((String) birthday);
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Invalid birthday format");
+            }
+        } else if (birthday instanceof java.sql.Date) {
+            return ((java.sql.Date) birthday).toLocalDate();
+        } else if (birthday instanceof java.util.Date) {
+            return ((java.util.Date) birthday).toInstant()
+                    .atZone(ZoneId.systemDefault())
+                    .toLocalDate();
+        } else {
+            throw new IllegalArgumentException("Unsupported birthday type: " + birthday.getClass());
+        }
+    }
+
+    private boolean isValidPassword(String password) {
+        if (password == null || password.isEmpty()) {
+            return false;
+        }
+        return !password.trim().isEmpty();
+    }
+
+    private boolean usernameExists(String username) {
+        String sql = "SELECT COUNT(*) FROM users WHERE LOWER(AuthorName) = LOWER(?)";
+        Integer count = jdbcTemplate.queryForObject(sql, Integer.class, username.trim());
+        return count != null && count > 0;
+    }
+
+    private int calculateAge(LocalDate birthday) {
+        if (birthday == null) {
             return -1;
         }
 
-        // 4. 生成唯一AuthorId（避免重复，优化随机数逻辑）
-        long authorId;
-        Boolean idExists;
-        do {
-            authorId = new Random().nextLong(1000000);
-            // 检查AuthorId是否已存在
-            idExists = jdbcTemplate.queryForObject(
-                    "SELECT EXISTS (SELECT 1 FROM users WHERE AuthorId = ?)",
-                    Boolean.class,
-                    authorId
-            );
-        } while (Boolean.TRUE.equals(idExists)); // 确保ID唯一
+        LocalDate now = LocalDate.now();
+        if (birthday.isAfter(now)) {
+            throw new IllegalArgumentException("Birthday cannot be in the future");
+        }
 
-        // 5. 修正SQL：字段匹配（去掉多余的Age？或用计算后的age）
-        // 注意：原SQL中的Age字段来自生日转换，Gender用枚举的字符串（统一大小写）
-        String sql = "INSERT INTO users (AuthorId, AuthorName, Gender, Age, Followers, Following, Password) " +
-                "VALUES (?, ?, ?, ?, 0, 0, ?)";
-        jdbcTemplate.update(sql,
-                authorId,
-                req.getName(),
-                req.getGender().toString(),
-                age, // 生日计算的年龄
-                req.getPassword() // 实际项目需用BCrypt加密：BCrypt.hashpw(req.getPassword(), BCrypt.gensalt())
-        );
+        int age = Period.between(birthday, now).getYears();
 
-        return authorId;
+        return Math.max(age, 0);
     }
 
     @Override
@@ -102,7 +162,6 @@ public class UserServiceImpl implements UserService {
         }
 
         try {
-            // 验证用户存在、未删除且密码匹配（实际项目需密码加密校验）
             return jdbcTemplate.queryForObject(
                     "SELECT AuthorId FROM users WHERE AuthorId = ? AND IsDeleted = FALSE AND Password = ?",
                     Long.class,
@@ -116,31 +175,22 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public boolean deleteAccount(AuthInfo auth, long userId) {
-        // 验证用户
         long loginUserId = login(auth);
         if (loginUserId == -1) {
             throw new SecurityException("Invalid or inactive user");
         }
-
-        // 验证操作目标是自己
         if (loginUserId != userId) {
             throw new SecurityException("Only can delete your own account");
         }
-
-        // 验证用户存在且活跃
         Boolean isActive = jdbcTemplate.queryForObject(
                 "SELECT IsDeleted FROM users WHERE AuthorId = ?",
                 Boolean.class,
                 userId
         );
         if (isActive == null || isActive) {
-            return false; // 已删除
+            return false;
         }
-
-        // 软删除用户
         jdbcTemplate.update("UPDATE users SET IsDeleted = TRUE WHERE AuthorId = ?", userId);
-
-        // 移除所有关注关系
         jdbcTemplate.update("DELETE FROM user_follows WHERE FollowerId = ? OR FollowingId = ?", userId, userId);
 
         return true;
@@ -148,28 +198,32 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public boolean follow(AuthInfo auth, long followeeId) {
-        // 验证用户
         long followerId = login(auth);
         if (followerId == -1) {
             throw new SecurityException("Invalid or inactive user");
         }
-
-        // 验证不能关注自己
         if (followerId == followeeId) {
             throw new SecurityException("Cannot follow yourself");
         }
 
-        // 验证被关注者存在
-        Boolean followeeExists = jdbcTemplate.queryForObject(
-                "SELECT EXISTS (SELECT 1 FROM users WHERE AuthorId = ? AND IsDeleted = FALSE)",
-                Boolean.class,
-                followeeId
-        );
-        if (followeeExists == null || !followeeExists) {
-            return false;
+        String checkUsersSql =
+                "SELECT " +
+                        "(SELECT COUNT(*) FROM users WHERE AuthorId = ? AND (IsDeleted IS NULL OR IsDeleted = FALSE)) as followerExists, " +
+                        "(SELECT COUNT(*) FROM users WHERE AuthorId = ? AND (IsDeleted IS NULL OR IsDeleted = FALSE)) as followeeExists";
+
+        Map<String, Object> result = jdbcTemplate.queryForMap(checkUsersSql, followerId, followeeId);
+
+        Long followerExists = (Long) result.get("followerexists");
+        Long followeeExists = (Long) result.get("followeeexists");
+
+        if (followerExists == null || followerExists == 0) {
+            throw new SecurityException("Current user does not exist or is deleted");
         }
 
-        // 切换关注状态
+        if (followeeExists == null || followeeExists == 0) {
+            throw new SecurityException("User to follow does not exist or is deleted");
+        }
+
         Boolean isFollowing = jdbcTemplate.queryForObject(
                 "SELECT EXISTS (SELECT 1 FROM user_follows WHERE FollowerId = ? AND FollowingId = ?)",
                 Boolean.class,
@@ -178,45 +232,104 @@ public class UserServiceImpl implements UserService {
         );
 
         if (isFollowing != null && isFollowing) {
-            // 取消关注
-            jdbcTemplate.update("DELETE FROM user_follows WHERE FollowerId = ? AND FollowingId = ?", followerId, followeeId);
-            // 更新关注数
-            jdbcTemplate.update("UPDATE users SET Following = Following - 1 WHERE AuthorId = ?", followerId);
-            jdbcTemplate.update("UPDATE users SET Followers = Followers - 1 WHERE AuthorId = ?", followeeId);
+            int deleted = jdbcTemplate.update(
+                    "DELETE FROM user_follows WHERE FollowerId = ? AND FollowingId = ?",
+                    followerId, followeeId
+            );
+
+            if (deleted > 0) {
+                jdbcTemplate.update("UPDATE users SET Following = GREATEST(Following - 1, 0) WHERE AuthorId = ?", followerId);
+                jdbcTemplate.update("UPDATE users SET Followers = GREATEST(Followers - 1, 0) WHERE AuthorId = ?", followeeId);
+            }
+
             return false;
         } else {
-            // 关注
-            jdbcTemplate.update("INSERT INTO user_follows (FollowerId, FollowingId) VALUES (?, ?)", followerId, followeeId);
-            // 更新关注数
-            jdbcTemplate.update("UPDATE users SET Following = Following + 1 WHERE AuthorId = ?", followerId);
-            jdbcTemplate.update("UPDATE users SET Followers = Followers + 1 WHERE AuthorId = ?", followeeId);
-            return true;
+            try {
+                jdbcTemplate.update(
+                        "INSERT INTO user_follows (FollowerId, FollowingId) VALUES (?, ?)",
+                        followerId, followeeId
+                );
+
+                jdbcTemplate.update("UPDATE users SET Following = Following + 1 WHERE AuthorId = ?", followerId);
+                jdbcTemplate.update("UPDATE users SET Followers = Followers + 1 WHERE AuthorId = ?", followeeId);
+
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
         }
     }
-
-
     @Override
     public UserRecord getById(long userId) {
+        if (userId <= 0) {
+            return null;
+        }
         try {
-            return jdbcTemplate.queryForObject(
-                    "SELECT AuthorId, AuthorName, Gender, Age, Followers, Following FROM users WHERE AuthorId = ?",
-                    new UserRowMapper(),
-                    userId
-            );
+            String userSql = "SELECT AuthorId, AuthorName, Gender, Age, Password, IsDeleted " +
+                    "FROM users WHERE AuthorId = ? AND (IsDeleted IS NULL OR IsDeleted = FALSE)";
+
+            UserRecord user = jdbcTemplate.queryForObject(userSql, (rs, rowNum) -> {
+                UserRecord record = new UserRecord();
+                record.setAuthorId(rs.getLong("AuthorId"));
+                record.setAuthorName(rs.getString("AuthorName"));
+                record.setGender(rs.getString("Gender"));
+                record.setAge(rs.getInt("Age"));
+                record.setPassword(rs.getString("Password"));
+                record.setDeleted(rs.getBoolean("IsDeleted"));
+                return record;
+            }, userId);
+
+            if (user != null) {
+                user.setFollowers(getFollowersCount(userId));
+                user.setFollowing(getFollowingCount(userId));
+                user.setFollowerUsers(getFollowerIds(userId));
+                user.setFollowingUsers(getFollowingIds(userId));
+            }
+
+            return user;
         } catch (EmptyResultDataAccessException e) {
             return null;
         }
     }
+    private int getFollowersCount(long userId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_follows WHERE FollowingId = ?",
+                Integer.class, userId
+        );
+        return count != null ? count : 0;
+    }
+
+    private int getFollowingCount(long userId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_follows WHERE FollowerId = ?",
+                Integer.class, userId
+        );
+        return count != null ? count : 0;
+    }
+
+    private long[] getFollowerIds(long userId) {
+        List<Long> ids = jdbcTemplate.queryForList(
+                "SELECT FollowerId FROM user_follows WHERE FollowingId = ?",
+                Long.class, userId
+        );
+        return ids.stream().mapToLong(Long::longValue).toArray();
+    }
+
+    private long[] getFollowingIds(long userId) {
+        List<Long> ids = jdbcTemplate.queryForList(
+                "SELECT FollowingId FROM user_follows WHERE FollowerId = ?",
+                Long.class, userId
+        );
+        return ids.stream().mapToLong(Long::longValue).toArray();
+    }
 
     @Override
     public void updateProfile(AuthInfo auth, String gender, Integer age) {
-        // 验证用户
         long userId = login(auth);
         if (userId == -1) {
             throw new SecurityException("Invalid or inactive user");
         }
 
-        // 构建更新SQL
         StringBuilder sql = new StringBuilder("UPDATE users SET ");
         List<Object> params = new ArrayList<>();
         boolean hasUpdate = false;
@@ -240,10 +353,9 @@ public class UserServiceImpl implements UserService {
         }
 
         if (!hasUpdate) {
-            return; // 无更新内容
+            return;
         }
 
-        // 移除末尾逗号并添加WHERE条件
         sql.setLength(sql.length() - 2);
         sql.append(" WHERE AuthorId = ?");
         params.add(userId);
@@ -264,9 +376,9 @@ public class UserServiceImpl implements UserService {
         size = Math.max(1, Math.min(size, 200));
         int offset = (page - 1) * size;
 
-        // 构建查询SQL
         StringBuilder sql = new StringBuilder(
-                "SELECT r.RecipeId, r.Name, r.AuthorId, u.AuthorName, r.DatePublished, r.RecipeCategory " +
+                "SELECT r.RecipeId, r.Name, r.AuthorId, u.AuthorName, " +
+                        "r.AggregatedRating, r.ReviewCount " +
                         "FROM recipes r " +
                         "JOIN users u ON r.AuthorId = u.AuthorId " +
                         "JOIN user_follows uf ON r.AuthorId = uf.FollowingId " +
@@ -286,10 +398,8 @@ public class UserServiceImpl implements UserService {
         params.add(size);
         params.add(offset);
 
-        // 查询结果
         List<FeedItem> items = jdbcTemplate.query(sql.toString(), new FeedItemRowMapper(), params.toArray());
 
-        // 总条数
         StringBuilder countSql = new StringBuilder(
                 "SELECT COUNT(*) " +
                         "FROM recipes r " +
@@ -339,21 +449,6 @@ public class UserServiceImpl implements UserService {
         }
     }
 
-    private static class UserRowMapper implements RowMapper<UserRecord> {
-        @Override
-        public UserRecord mapRow(ResultSet rs, int rowNum) throws SQLException {
-            UserRecord record = new UserRecord();
-            record.setAuthorId(rs.getLong("AuthorId"));
-            record.setAuthorName(rs.getString("AuthorName"));
-            record.setGender(rs.getString("Gender"));
-            record.setAge(rs.getInt("Age"));
-            record.setFollowers(rs.getInt("Followers"));
-            record.setFollowing(rs.getInt("Following"));
-            return record;
-        }
-    }
-
-    // 自定义RowMapper：将ResultSet映射为FeedItem
     private static class FeedItemRowMapper implements RowMapper<FeedItem> {
         @Override
         public FeedItem mapRow(ResultSet rs, int rowNum) throws SQLException {
@@ -362,8 +457,19 @@ public class UserServiceImpl implements UserService {
             item.setName(rs.getString("Name"));
             item.setAuthorId(rs.getLong("AuthorId"));
             item.setAuthorName(rs.getString("AuthorName"));
-            item.setDatePublished(rs.getTimestamp("DatePublished"));
-            item.setCategory(rs.getString("RecipeCategory"));
+
+            // 处理可能为null的评分
+            double rating = rs.getDouble("AggregatedRating");
+            item.setAggregatedRating(rs.wasNull() ? 0.0 : rating);
+
+            // 处理可能为null的评论数
+            int reviewCount = rs.getInt("ReviewCount");
+            item.setReviewCount(rs.wasNull() ? 0 : reviewCount);
+
+            // 这些字段设为null
+            item.setDatePublished(null);
+            item.setRecipeCategory(null);
+
             return item;
         }
     }

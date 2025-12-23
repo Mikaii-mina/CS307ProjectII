@@ -146,30 +146,14 @@ public class RecipeRecord implements Serializable {
      */
     private String recipeYield;
 
-    /**
-     * 获取食材列表
-     * @return 不可修改的食材列表（避免外部修改影响内部数组），如果数组为null则返回空列表
-     */
-    public List<String> getIngredients() {
+    public void setRecipeIngredientParts(String[] recipeIngredientParts) {
         if (recipeIngredientParts == null) {
-            // 返回空列表而非null，避免空指针异常
-            return Collections.emptyList();
+            this.recipeIngredientParts = new String[0];
+            return;
         }
-        // 将数组转换为不可修改的列表，防止外部修改内部数据
-        return Collections.unmodifiableList(Arrays.asList(recipeIngredientParts));
-    }
 
-    /**
-     * 设置食材列表
-     * @param ingredients 食材列表（null则清空内部数组）
-     */
-    public void setIngredients(List<String> ingredients) {
-        if (ingredients == null || ingredients.isEmpty()) {
-            this.recipeIngredientParts = null;
-        } else {
-            // 将列表转换为数组存储
-            this.recipeIngredientParts = ingredients.toArray(new String[0]);
-        }
+        this.recipeIngredientParts = Arrays.copyOf(recipeIngredientParts, recipeIngredientParts.length);
+        Arrays.sort(this.recipeIngredientParts, String.CASE_INSENSITIVE_ORDER);
     }
 
 }

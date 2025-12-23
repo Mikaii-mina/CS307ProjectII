@@ -47,4 +47,5 @@ public interface DatabaseService {
      * @return the sum of two numbers
      */
     Integer sum(int a, int b);
+
 }
